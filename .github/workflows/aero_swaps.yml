@@ -1,0 +1,66 @@
+# .github/workflows/aero_swaps.yml
+# Запуск: Actions → "Aerodrome swaps report" → Run workflow → вписать окно времени
+name: Aerodrome swaps report
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "Начало окна (YYYY-MM-DD HH:MM)"
+        required: false
+        default: ""
+      end:
+        description: "Конец окна (YYYY-MM-DD HH:MM). Пусто = сейчас"
+        required: false
+        default: ""
+      last_hours:
+        description: "Или: последние N часов (если start пустой)"
+        required: false
+        default: ""
+      tz:
+        description: "Часовой пояс времени выше"
+        required: false
+        default: "Asia/Tbilisi"
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install web3 gspread google-auth
+
+      # кэш tx.from — повторные запуски по тем же часам быстрее
+      - name: Restore tx cache
+        uses: actions/cache@v4
+        with:
+          path: state/**/swaps/tx_from_cache.json
+          key: aero-swaps-txcache-${{ github.run_id }}
+          restore-keys: aero-swaps-txcache-
+
+      - name: Run swaps report
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          SWAPS_SPREADSHEET_ID: ${{ secrets.SWAPS_SPREADSHEET_ID || secrets.AERO_SPREADSHEET_ID }}
+          # необязательно: если лейблы лежат в другой таблице / на листе с другим именем
+          LABELS_SPREADSHEET_ID: ${{ secrets.LABELS_SPREADSHEET_ID }}
+          LABELS_SHEET: ${{ vars.LABELS_SHEET || 'labels' }}
+          SWAP_START: ${{ inputs.start }}
+          SWAP_END: ${{ inputs.end }}
+          SWAP_LAST_HOURS: ${{ inputs.last_hours }}
+          SWAP_TZ: ${{ inputs.tz }}
+        run: python aero_swaps.py
+
+      - name: Upload CSV
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aero-swaps-csv
+          path: out/**/swaps/*.csv
